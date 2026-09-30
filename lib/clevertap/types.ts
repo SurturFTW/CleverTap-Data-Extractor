@@ -34,6 +34,14 @@ export type PropertyFilter = {
   value?: string | number | string[];
 };
 
+/** Filters for the Get Events export */
+export type EventFilters = {
+  eventProperties: PropertyFilter[];
+  /** Profile fields (Email, Phone, custom profile properties...) */
+  profile: PropertyFilter[];
+  technographics: PropertyFilter[];
+};
+
 /** Which count API: events performed, or unique profiles who performed them */
 export type CountKind = "events" | "profiles";
 

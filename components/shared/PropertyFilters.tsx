@@ -51,10 +51,14 @@ export default function PropertyFilters({
   filters,
   onChange,
   hint,
+  title = "Event property filters",
+  namePlaceholder = "Property name",
 }: {
   filters: FilterRow[];
   onChange: (f: FilterRow[]) => void;
   hint: string;
+  title?: string;
+  namePlaceholder?: string;
 }) {
   const patch = (id: string, p: Partial<FilterRow>) =>
     onChange(filters.map((f) => (f.id === id ? { ...f, ...p } : f)));
@@ -62,7 +66,7 @@ export default function PropertyFilters({
   return (
     <div className="flex flex-col gap-3 sm:col-span-2">
       <p className="text-sm font-medium text-gray-700">
-        Event property filters <span className="font-normal text-gray-500">({hint})</span>
+        {title} <span className="font-normal text-gray-500">({hint})</span>
       </p>
       {filters.map((f) => {
         const needsValue = OPERATORS.find((o) => o.value === f.operator)!.needsValue;
@@ -70,7 +74,7 @@ export default function PropertyFilters({
           <div key={f.id} className="grid items-center gap-2 sm:grid-cols-[1fr_12rem_1fr_auto]">
             <input
               className={inputClass}
-              placeholder="Property name"
+              placeholder={namePlaceholder}
               value={f.name}
               onChange={(e) => patch(f.id, { name: e.target.value })}
             />

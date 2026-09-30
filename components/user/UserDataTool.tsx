@@ -70,6 +70,8 @@ export default function UserDataTool() {
     const [from, setFrom] = useState(daysAgo(1));
     const [to, setTo] = useState(daysAgo(0));
     const [filters, setFilters] = useState<FilterRow[]>([]);
+    const [profileFilters, setProfileFilters] = useState<FilterRow[]>([]);
+    const [techFilters, setTechFilters] = useState<FilterRow[]>([]);
 
     const [running, setRunning] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -142,6 +144,11 @@ export default function UserDataTool() {
                 const eventProperties = buildFilters(filters);
                 if (typeof eventProperties === "string")
                     return setError(eventProperties);
+                const profile = buildFilters(profileFilters);
+                if (typeof profile === "string") return setError(profile);
+                const technographics = buildFilters(techFilters);
+                if (typeof technographics === "string")
+                    return setError(technographics);
 
                 setLookupUsed(!!v.lookup);
                 setEventNames(names);
@@ -176,7 +183,7 @@ export default function UserDataTool() {
                             name,
                             { from: fromInt, to: toInt },
                             v.lookup,
-                            eventProperties,
+                            { eventProperties, profile, technographics },
                             (batch, p) =>
                                 update(name, (r) => ({
                                     records: [...r.records, ...batch],
@@ -342,6 +349,20 @@ export default function UserDataTool() {
                             filters={filters}
                             onChange={setFilters}
                             hint="optional, applied to every selected event"
+                        />
+                        <PropertyFilters
+                            filters={profileFilters}
+                            onChange={setProfileFilters}
+                            title="Profile property filters"
+                            namePlaceholder="Profile field (e.g. Email, Name, Gender)"
+                            hint="optional, e.g. Email, Phone or custom profile properties"
+                        />
+                        <PropertyFilters
+                            filters={techFilters}
+                            onChange={setTechFilters}
+                            title="Technographic filters"
+                            namePlaceholder="Field (e.g. os_version, make, model)"
+                            hint="optional, device/app properties"
                         />
                         <p className="text-sm text-gray-500 sm:col-span-2">
                             Enter an email or phone to get one user&apos;s events;

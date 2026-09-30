@@ -7,7 +7,7 @@ import type {
   ExportStartResponse,
   ProfileRecord,
   ProfileResponse,
-  PropertyFilter,
+  EventFilters,
   UserLookup,
 } from "./types";
 
@@ -65,14 +65,14 @@ export async function scanUserEvents(
   eventName: string,
   range: DateRange,
   lookup: UserLookup | undefined,
-  eventProperties: PropertyFilter[],
+  filters: EventFilters,
   onProgress: (records: EventRecord[], p: ScanProgress) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const startExport = async (useFilter: boolean) => {
     const res = await post<ExportStartResponse>(
       "/api/clevertap/events",
-      { credentials, eventName, range, lookup, eventProperties, useFilter },
+      { credentials, eventName, range, lookup, filters, useFilter },
       signal,
     );
     if (res.status === "fail") throw new Error(res.error);
@@ -97,7 +97,7 @@ export async function scanUserEvents(
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
       res = await post<EventBatchResponse>(
         "/api/clevertap/events",
-        { credentials, cursor, lookup, eventProperties },
+        { credentials, cursor, lookup, filters },
         signal,
       );
     }

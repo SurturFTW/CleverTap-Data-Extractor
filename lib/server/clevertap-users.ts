@@ -6,6 +6,7 @@ import type {
   ExportStartResponse,
   ProfileRecord,
   ProfileResponse,
+  EventFilters,
   PropertyFilter,
   UserLookup,
 } from "@/lib/clevertap/types";
@@ -95,7 +96,7 @@ export async function startEventExport(
   eventName: string,
   range: DateRange,
   lookup?: UserLookup,
-  eventProperties: PropertyFilter[] = [],
+  filters: EventFilters = NO_FILTERS,
   useFilter = true,
 ): Promise<ExportStartResponse> {
   // Event property filters use the same shape as the count APIs. If CleverTap
@@ -104,15 +105,17 @@ export async function startEventExport(
     event_name: eventName,
     from: range.from,
     to: range.to,
-    ...(eventProperties.length ? { event_properties: eventProperties } : {}),
+    ...(filters.eventProperties.length ? { event_properties: filters.eventProperties } : {}),
   };
-  const filter = lookup && useFilter ? ctqlProfileFilter(lookup) : null;
+  const lookupFilter = lookup && useFilter ? ctqlProfileFilter(lookup) : null;
+  const profileFields = [...(lookupFilter ? [lookupFilter] : []), ...filters.profile];
+  const common = {
+    ...(profileFields.length ? { profile_fields: profileFields } : {}),
+    ...(filters.technographics.length ? { technographics: filters.technographics } : {}),
+  };
 
-  if (filter) {
-    const { data } = await postExport(creds, {
-      ...plain,
-      common_profile_properties: { profile_fields: [filter] },
-    });
+  if (Object.keys(common).length) {
+    const { data } = await postExport(creds, { ...plain, common_profile_properties: common });
     if (data.status === "success" && typeof data.cursor === "string") {
       return { status: "success", cursor: data.cursor, filtered: true };
     }
@@ -160,9 +163,23 @@ function matches(rec: EventRecord, lookup: UserLookup): boolean {
 
 const num = (v: unknown) => (v === "" || v == null ? NaN : Number(v));
 
-/** Re-applies an event property filter to an exported record. */
-function matchesProperty(rec: EventRecord, f: PropertyFilter): boolean {
-  const props = rec.event_props ?? {};
+const NO_FILTERS: EventFilters = { eventProperties: [], profile: [], technographics: [] };
+
+/** Profile fields as a flat map: top-level identity fields plus profileData. */
+function profileProps(rec: EventRecord): Record<string, unknown> {
+  const { profileData, ...top } = rec.profile ?? {};
+  return { ...top, ...(profileData ?? {}) };
+}
+
+/**
+ * Re-applies a property filter to an exported record (technographics aren't
+ * re-checked: their field names in the export differ from the filter names).
+ */
+function matchesProperty(
+  source: Record<string, unknown> | undefined,
+  f: PropertyFilter,
+): boolean {
+  const props = source ?? {};
   const key = Object.keys(props).find((k) => k.toLowerCase() === f.name.toLowerCase());
   const actual = key === undefined ? undefined : props[key];
   if (f.operator === "exists") return actual !== undefined && actual !== null;
@@ -208,7 +225,7 @@ export async function fetchEventBatch(
   creds: Credentials,
   cursor: string,
   lookup?: UserLookup,
-  eventProperties: PropertyFilter[] = [],
+  filters: EventFilters = NO_FILTERS,
 ): Promise<EventBatchResponse> {
   // Batches are fetched with POST + ?cursor= (as in the working reference
   // implementation), not the GET shown in the docs.
@@ -234,7 +251,8 @@ export async function fetchEventBatch(
       records: all.filter(
         (r) =>
           (!lookup || matches(r, lookup)) &&
-          eventProperties.every((f) => matchesProperty(r, f)),
+          filters.eventProperties.every((f) => matchesProperty(r.event_props, f)) &&
+          filters.profile.every((f) => matchesProperty(profileProps(r), f)),
       ),
       nextCursor: typeof data.next_cursor === "string" ? data.next_cursor : null,
       scanned: all.length,
