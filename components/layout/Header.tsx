@@ -1,7 +1,16 @@
+"use client";
+
 import Link from "next/link";
 import Image from "next/image";
+import { usePathname } from "next/navigation";
+import { UserCheck } from "lucide-react";
+
+const LINKS = [
+    { href: "/identity-errors", label: "Identity Errors", icon: UserCheck },
+];
 
 export default function Header() {
+    const pathname = usePathname();
     return (
         <header className="border-b border-gray-200 bg-white">
             <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
@@ -18,6 +27,25 @@ export default function Header() {
                         CleverPort
                     </span>
                 </Link>
+                <nav className="flex items-center gap-3">
+                    {LINKS.map((l) => {
+                        const active = pathname === l.href;
+                        return (
+                            <Link
+                                key={l.href}
+                                href={l.href}
+                                className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition-all duration-200 ${
+                                    active
+                                        ? "bg-black text-white"
+                                        : "border border-black text-black hover:bg-gray-50"
+                                }`}
+                            >
+                                <l.icon size={16} />
+                {l.label}
+                            </Link>
+                        );
+                    })}
+                </nav>
             </div>
         </header>
     );
