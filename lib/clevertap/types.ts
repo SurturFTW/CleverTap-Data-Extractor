@@ -14,11 +14,28 @@ export type DateRange = {
   to: number;
 };
 
+export const FILTER_OPERATORS = [
+  "equals",
+  "contains",
+  "not_contains",
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "exists",
+  "not_exists",
+] as const;
+export type FilterOperator = (typeof FILTER_OPERATORS)[number];
+
 export type PropertyFilter = {
   name: string;
-  operator: "equals";
-  value: string | string[];
+  operator: FilterOperator;
+  /** Omitted for exists / not_exists */
+  value?: string | number | string[];
 };
+
+/** Which count API: events performed, or unique profiles who performed them */
+export type CountKind = "events" | "profiles";
 
 export type CountQuery = {
   eventName: string;

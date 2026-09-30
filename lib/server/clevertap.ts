@@ -1,14 +1,15 @@
 import type {
+  CountKind,
   CountQuery,
   CountResponse,
   Credentials,
   DateRange,
 } from "@/lib/clevertap/types";
 
-function endpoint(region: string) {
+function endpoint(region: string, kind: CountKind) {
   // `region` is validated against the REGIONS whitelist by the route handler,
-  // so the host is never user-controlled.
-  return `https://${region}.api.clevertap.com/1/counts/events.json`;
+  // so the host is never user-controlled. `kind` is one of two fixed paths.
+  return `https://${region}.api.clevertap.com/1/counts/${kind}.json`;
 }
 
 function headers(creds: Credentials) {
@@ -44,6 +45,7 @@ export async function startCount(
   creds: Credentials,
   query: CountQuery,
   range: DateRange,
+  kind: CountKind = "events",
 ): Promise<CountResponse> {
   const payload: Record<string, unknown> = {
     event_name: query.eventName,
@@ -59,7 +61,7 @@ export async function startCount(
     };
   }
 
-  const res = await fetch(endpoint(creds.region), {
+  const res = await fetch(endpoint(creds.region, kind), {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers(creds) },
     body: JSON.stringify(payload),
@@ -72,9 +74,10 @@ export async function startCount(
 export async function pollCount(
   creds: Credentials,
   reqId: number | string,
+  kind: CountKind = "events",
 ): Promise<CountResponse> {
   const res = await fetch(
-    `${endpoint(creds.region)}?req_id=${encodeURIComponent(String(reqId))}`,
+    `${endpoint(creds.region, kind)}?req_id=${encodeURIComponent(String(reqId))}`,
     { method: "GET", headers: headers(creds), cache: "no-store" },
   );
   return parse(res);

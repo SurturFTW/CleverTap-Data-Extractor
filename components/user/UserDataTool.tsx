@@ -27,7 +27,7 @@ import {
     SecondaryButton,
     inputClass,
 } from "@/components/shared/ui";
-import EventPicker from "./EventPicker";
+import EventPicker from "@/components/shared/EventPicker";
 import EventResults from "./EventResults";
 import ProfileResults from "./ProfileResults";
 

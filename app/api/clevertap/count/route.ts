@@ -1,6 +1,8 @@
 import { pollCount, startCount } from "@/lib/server/clevertap";
 import {
+  FILTER_OPERATORS,
   REGIONS,
+  type CountKind,
   type CountQuery,
   type Credentials,
   type DateRange,
@@ -13,6 +15,8 @@ type Body = {
   query?: CountQuery;
   range?: DateRange;
   reqId?: number | string;
+  /** "events" (default) or "profiles" */
+  kind?: CountKind;
 };
 
 const bad = (error: string) =>
@@ -22,7 +26,7 @@ const isDate = (n: unknown) =>
   typeof n === "number" && Number.isInteger(n) && n >= 19000101 && n <= 99991231;
 
 /**
- * Stateless proxy to CleverTap's event-count API. Credentials are supplied per
+ * Stateless proxy to CleverTap's event-count and profile-count APIs. Credentials are supplied per
  * request by the user and are never stored or logged. Each call is one short
  * upstream request; the client drives the partial -> poll loop.
  */
@@ -42,9 +46,11 @@ export async function POST(request: Request) {
   if (!region || !REGIONS.includes(region)) return bad("Unknown region");
   const creds: Credentials = { accountId, passcode, region };
 
+  const kind: CountKind = body.kind === "profiles" ? "profiles" : "events";
+
   try {
     if (body.reqId != null) {
-      return Response.json(await pollCount(creds, body.reqId));
+      return Response.json(await pollCount(creds, body.reqId, kind));
     }
 
     const { query, range } = body;
@@ -53,8 +59,13 @@ export async function POST(request: Request) {
       return bad("from/to must be YYYYMMDD integers");
     }
     if (range.from > range.to) return bad("From date must be on or before To date");
+    for (const f of query.eventProperties ?? []) {
+      if (!f?.name || !FILTER_OPERATORS.includes(f.operator)) {
+        return bad("Invalid event property filter");
+      }
+    }
 
-    return Response.json(await startCount(creds, query, range));
+    return Response.json(await startCount(creds, query, range, kind));
   } catch (e) {
     return Response.json(
       { status: "fail", error: e instanceof Error ? e.message : "Upstream error" },

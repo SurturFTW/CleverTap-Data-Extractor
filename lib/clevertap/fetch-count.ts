@@ -1,5 +1,6 @@
 import { sleep } from "@/lib/utils/pool";
 import type {
+  CountKind,
   CountQuery,
   CountResponse,
   Credentials,
@@ -22,19 +23,23 @@ async function call(
   return (await res.json()) as CountResponse;
 }
 
-/** Fetches one event count, transparently polling while CleverTap reports "partial". */
+/**
+ * Fetches one count (events performed, or unique profiles), transparently
+ * polling while CleverTap reports "partial".
+ */
 export async function fetchCount(
   credentials: Credentials,
   query: CountQuery,
   range: DateRange,
   signal?: AbortSignal,
+  kind: CountKind = "events",
 ): Promise<number> {
-  let res = await call({ credentials, query, range }, signal);
+  let res = await call({ credentials, query, range, kind }, signal);
 
   for (let i = 0; res.status === "partial" && i < POLL_MAX_TRIES; i++) {
     await sleep(POLL_INTERVAL_MS);
     if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    res = await call({ credentials, reqId: res.reqId }, signal);
+    res = await call({ credentials, reqId: res.reqId, kind }, signal);
   }
 
   if (res.status === "success") return res.count;
