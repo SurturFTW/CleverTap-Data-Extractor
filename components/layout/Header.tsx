@@ -3,10 +3,11 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { UserCheck } from "lucide-react";
+import { BellRing, UserCheck } from "lucide-react";
 
 const LINKS = [
     { href: "/identity-errors", label: "Identity Errors", icon: UserCheck },
+    { href: "/push-impressions", label: "Push Impressions", icon: BellRing },
 ];
 
 export default function Header() {
