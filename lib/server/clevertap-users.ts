@@ -6,6 +6,7 @@ import type {
   ExportStartResponse,
   ProfileRecord,
   ProfileResponse,
+  PropertyFilter,
   UserLookup,
 } from "@/lib/clevertap/types";
 
@@ -94,9 +95,17 @@ export async function startEventExport(
   eventName: string,
   range: DateRange,
   lookup?: UserLookup,
+  eventProperties: PropertyFilter[] = [],
   useFilter = true,
 ): Promise<ExportStartResponse> {
-  const plain = { event_name: eventName, from: range.from, to: range.to };
+  // Event property filters use the same shape as the count APIs. If CleverTap
+  // ignores them, fetchEventBatch re-applies them to every record.
+  const plain = {
+    event_name: eventName,
+    from: range.from,
+    to: range.to,
+    ...(eventProperties.length ? { event_properties: eventProperties } : {}),
+  };
   const filter = lookup && useFilter ? ctqlProfileFilter(lookup) : null;
 
   if (filter) {
@@ -149,6 +158,39 @@ function matches(rec: EventRecord, lookup: UserLookup): boolean {
   }
 }
 
+const num = (v: unknown) => (v === "" || v == null ? NaN : Number(v));
+
+/** Re-applies an event property filter to an exported record. */
+function matchesProperty(rec: EventRecord, f: PropertyFilter): boolean {
+  const props = rec.event_props ?? {};
+  const key = Object.keys(props).find((k) => k.toLowerCase() === f.name.toLowerCase());
+  const actual = key === undefined ? undefined : props[key];
+  if (f.operator === "exists") return actual !== undefined && actual !== null;
+  if (f.operator === "not_exists") return actual === undefined || actual === null;
+  if (actual === undefined || actual === null) return f.operator === "not_contains";
+
+  const a = String(actual).toLowerCase();
+  const want = Array.isArray(f.value) ? f.value : [f.value];
+  const w = want.map((x) => String(x ?? "").toLowerCase());
+  switch (f.operator) {
+    case "equals":
+      return w.includes(a);
+    case "contains":
+      return w.some((x) => a.includes(x));
+    case "not_contains":
+      return !w.some((x) => a.includes(x));
+    case "gt":
+      return num(actual) > num(f.value);
+    case "gte":
+      return num(actual) >= num(f.value);
+    case "lt":
+      return num(actual) < num(f.value);
+    case "lte":
+      return num(actual) <= num(f.value);
+  }
+  return true;
+}
+
 /**
  * CleverTap wants the cursor exactly as returned (it may already contain
  * encoded characters), so don't URL-encode it again. Only neutralise the
@@ -166,6 +208,7 @@ export async function fetchEventBatch(
   creds: Credentials,
   cursor: string,
   lookup?: UserLookup,
+  eventProperties: PropertyFilter[] = [],
 ): Promise<EventBatchResponse> {
   // Batches are fetched with POST + ?cursor= (as in the working reference
   // implementation), not the GET shown in the docs.
@@ -188,7 +231,11 @@ export async function fetchEventBatch(
     const all = (data.records as EventRecord[] | undefined) ?? [];
     return {
       status: "success",
-      records: lookup ? all.filter((r) => matches(r, lookup)) : all,
+      records: all.filter(
+        (r) =>
+          (!lookup || matches(r, lookup)) &&
+          eventProperties.every((f) => matchesProperty(r, f)),
+      ),
       nextCursor: typeof data.next_cursor === "string" ? data.next_cursor : null,
       scanned: all.length,
     };

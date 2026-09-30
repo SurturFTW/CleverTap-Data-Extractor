@@ -1,7 +1,9 @@
 import {
+  FILTER_OPERATORS,
   REGIONS,
   type Credentials,
   type DateRange,
+  type PropertyFilter,
   type UserLookup,
 } from "@/lib/clevertap/types";
 
@@ -33,4 +35,16 @@ export function parseLookup(l: Partial<UserLookup> | undefined): UserLookup | st
   if (!["identity", "email", "objectId", "phone"].includes(l.type as string))
     return "Unknown lookup type";
   return { type: l.type as UserLookup["type"], value };
+}
+
+export function parseFilters(list: unknown): PropertyFilter[] | string {
+  if (list == null) return [];
+  if (!Array.isArray(list)) return "Invalid event property filters";
+  const out: PropertyFilter[] = [];
+  for (const f of list as Partial<PropertyFilter>[]) {
+    if (!f?.name || typeof f.name !== "string" || !FILTER_OPERATORS.includes(f.operator as never))
+      return "Invalid event property filter";
+    out.push({ name: f.name, operator: f.operator!, ...(f.value !== undefined && { value: f.value }) });
+  }
+  return out;
 }

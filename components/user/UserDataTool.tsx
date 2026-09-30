@@ -28,6 +28,10 @@ import {
     inputClass,
 } from "@/components/shared/ui";
 import EventPicker from "@/components/shared/EventPicker";
+import PropertyFilters, {
+    buildFilters,
+    type FilterRow,
+} from "@/components/shared/PropertyFilters";
 import EventResults from "./EventResults";
 import ProfileResults from "./ProfileResults";
 
@@ -65,6 +69,7 @@ export default function UserDataTool() {
     const [eventInput, setEventInput] = useState("");
     const [from, setFrom] = useState(daysAgo(1));
     const [to, setTo] = useState(daysAgo(0));
+    const [filters, setFilters] = useState<FilterRow[]>([]);
 
     const [running, setRunning] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -134,6 +139,10 @@ export default function UserDataTool() {
                 if (fromInt > toInt)
                     return setError("From date must be on or before To date.");
 
+                const eventProperties = buildFilters(filters);
+                if (typeof eventProperties === "string")
+                    return setError(eventProperties);
+
                 setLookupUsed(!!v.lookup);
                 setEventNames(names);
                 setEventInput("");
@@ -167,6 +176,7 @@ export default function UserDataTool() {
                             name,
                             { from: fromInt, to: toInt },
                             v.lookup,
+                            eventProperties,
                             (batch, p) =>
                                 update(name, (r) => ({
                                     records: [...r.records, ...batch],
@@ -328,6 +338,11 @@ export default function UserDataTool() {
                                 onChange={(e) => setTo(e.target.value)}
                             />
                         </Label>
+                        <PropertyFilters
+                            filters={filters}
+                            onChange={setFilters}
+                            hint="optional, applied to every selected event"
+                        />
                         <p className="text-sm text-gray-500 sm:col-span-2">
                             Enter an email or phone to get one user&apos;s events;
                             leave it empty to get event data for all users (the
