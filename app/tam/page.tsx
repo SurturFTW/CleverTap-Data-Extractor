@@ -1,7 +1,10 @@
 import PageTitle from "@/components/shared/PageTitle";
 import TamTracker from "@/components/tam/TamTracker";
 
-export const metadata = { title: "TAM Tracker · CleverPort" };
+export const metadata = {
+  title: "TAM Tracker · CleverPort",
+  robots: { index: false, follow: false },
+};
 
 export default function Page() {
   return (
