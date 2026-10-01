@@ -1,3 +1,4 @@
+import { postJson } from "@/lib/utils/http";
 import { sleep } from "@/lib/utils/pool";
 import type {
   CountKind,
@@ -14,13 +15,11 @@ async function call(
   body: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<CountResponse> {
-  const res = await fetch("/api/clevertap/count", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+  return postJson<CountResponse>("/api/clevertap/count", body, {
     signal,
+    step: "Count",
+    retries: 2,
   });
-  return (await res.json()) as CountResponse;
 }
 
 /**

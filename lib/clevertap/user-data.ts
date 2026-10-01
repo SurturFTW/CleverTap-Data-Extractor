@@ -1,3 +1,4 @@
+import { postJson } from "@/lib/utils/http";
 import { sleep } from "@/lib/utils/pool";
 import type {
   Credentials,
@@ -17,19 +18,16 @@ const MAX_BATCHES = 400; // 400 x 5,000 = 2M records scanned at most
 const PENDING_WAIT_MS = 3000;
 const PENDING_MAX_TRIES = 40;
 
-async function post<T>(
+/** Idempotent reads: a gateway timeout is retried twice before giving up. */
+const post = <T,>(
   url: string,
   body: Record<string, unknown>,
-  signal?: AbortSignal,
-): Promise<T> {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal,
-  });
-  return (await res.json()) as T;
-}
+  signal: AbortSignal | undefined,
+  step: string,
+) => postJson<T>(url, body, { signal, step, retries: 2 });
+
+const START_WAIT_MS = 2000;
+const START_MAX_TRIES = 30; // ~1 minute of "CleverTap is still preparing the export"
 
 export async function fetchProfile(
   credentials: Credentials,
@@ -40,6 +38,7 @@ export async function fetchProfile(
     "/api/clevertap/profile",
     { credentials, lookup },
     signal,
+    "Profile lookup",
   );
   if (res.status === "fail") throw new Error(res.error);
   return res.record;
@@ -69,14 +68,29 @@ export async function scanUserEvents(
   onProgress: (records: EventRecord[], p: ScanProgress) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const startExport = async (useFilter: boolean) => {
-    const res = await post<ExportStartResponse>(
-      "/api/clevertap/events",
-      { credentials, eventName, range, lookup, filters, useFilter },
-      signal,
-    );
-    if (res.status === "fail") throw new Error(res.error);
-    return res;
+  type Started = Extract<ExportStartResponse, { status: "success" }>;
+
+  // Each call asks CleverTap once; "pending" (slow / still preparing) is retried
+  // here in the browser so no single server request has to wait long.
+  const startExport = async (useFilter: boolean): Promise<Started> => {
+    for (let i = 0; i < START_MAX_TRIES; i++) {
+      if (i > 0) await sleep(START_WAIT_MS);
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      const res = await post<ExportStartResponse>(
+        "/api/clevertap/events",
+        { credentials, eventName, range, lookup, filters, useFilter },
+        signal,
+        "Start export",
+      );
+      if (res.status === "success") return res;
+      if (res.status === "fail") {
+        // CleverTap refused the filtered export: fall back to a plain one,
+        // which is then filtered record by record.
+        if (res.filterRejected && useFilter) return startExport(false);
+        throw new Error(res.error);
+      }
+    }
+    throw new Error("Start export: CleverTap is still preparing the export. Try again shortly.");
   };
 
   let start = await startExport(true);
@@ -97,8 +111,9 @@ export async function scanUserEvents(
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
       res = await post<EventBatchResponse>(
         "/api/clevertap/events",
-        { credentials, cursor, lookup, filters },
+        { credentials, cursor, lookup, filters, serverFiltered: start.filtered },
         signal,
+        "Fetch batch",
       );
     }
     if (res.status === "pending") throw new Error("Timed out waiting for CleverTap");

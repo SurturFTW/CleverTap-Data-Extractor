@@ -21,6 +21,7 @@ import {
   type UploadResponse,
 } from "@/lib/clevertap/upload";
 import { fmtNumber } from "@/lib/utils/format";
+import { postJson } from "@/lib/utils/http";
 import RecordEditor from "./RecordEditor";
 
 type Outcome = { kind: UploadKind; dryRun: boolean; sent: number; res: UploadResponse };
@@ -72,10 +73,9 @@ export default function UploadTool() {
 
     setBusy(dryRun ? "dry" : "live");
     try {
-      const res = await fetch("/api/clevertap/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const data = await postJson<UploadResponse>(
+                "/api/clevertap/upload",
+                {
           credentials: {
             accountId: current.accountId.trim(),
             passcode: current.passcode.trim(),
@@ -83,9 +83,10 @@ export default function UploadTool() {
           },
           records: batch.value,
           dryRun,
-        }),
-      });
-      const data = (await res.json()) as UploadResponse;
+        },
+                // Writes are never retried automatically
+                { step: "Upload", retries: 0 },
+            );
       setOutcome({ kind, dryRun, sent: batch.value.length, res: data });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
