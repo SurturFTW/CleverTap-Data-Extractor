@@ -28,6 +28,10 @@ import {
     inputClass,
 } from "@/components/shared/ui";
 import EventPicker from "@/components/shared/EventPicker";
+import PropertyFilters, {
+    buildFilters,
+    type FilterRow,
+} from "@/components/shared/PropertyFilters";
 import EventResults from "./EventResults";
 import ProfileResults from "./ProfileResults";
 
@@ -40,11 +44,8 @@ const LOOKUP_TYPES: { value: LookupType; label: string }[] = [
     { value: "phone", label: "Phone" },
 ];
 
-// Profile API: identity / email / objectId. Event export: email / phone.
-const LOOKUPS_BY_TAB: Record<"profile" | "events", LookupType[]> = {
-    profile: ["identity", "email", "objectId"],
-    events: ["email", "phone"],
-};
+// Profile API: identity / email / objectId.
+const PROFILE_LOOKUPS: LookupType[] = ["identity", "email", "objectId"];
 
 type EventRun = {
     name: string;
@@ -65,6 +66,9 @@ export default function UserDataTool() {
     const [eventInput, setEventInput] = useState("");
     const [from, setFrom] = useState(daysAgo(1));
     const [to, setTo] = useState(daysAgo(0));
+    const [filters, setFilters] = useState<FilterRow[]>([]);
+    const [profileFilters, setProfileFilters] = useState<FilterRow[]>([]);
+    const [techFilters, setTechFilters] = useState<FilterRow[]>([]);
 
     const [running, setRunning] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -96,9 +100,11 @@ export default function UserDataTool() {
                 passcode: current.passcode.trim(),
                 region: current.region,
             },
-            lookup: lookupValue.trim()
-                ? { type: lookupType, value: lookupValue.trim() }
-                : undefined,
+            // Event data is narrowed with the profile filters instead.
+            lookup:
+                tab === "profile" && lookupValue.trim()
+                    ? { type: lookupType, value: lookupValue.trim() }
+                    : undefined,
         };
     }
 
@@ -134,7 +140,16 @@ export default function UserDataTool() {
                 if (fromInt > toInt)
                     return setError("From date must be on or before To date.");
 
-                setLookupUsed(!!v.lookup);
+                const eventProperties = buildFilters(filters);
+                if (typeof eventProperties === "string")
+                    return setError(eventProperties);
+                const profile = buildFilters(profileFilters);
+                if (typeof profile === "string") return setError(profile);
+                const technographics = buildFilters(techFilters);
+                if (typeof technographics === "string")
+                    return setError(technographics);
+
+                setLookupUsed(profile.length > 0);
                 setEventNames(names);
                 setEventInput("");
                 setRuns(
@@ -167,6 +182,7 @@ export default function UserDataTool() {
                             name,
                             { from: fromInt, to: toInt },
                             v.lookup,
+                            { eventProperties, profile, technographics },
                             (batch, p) =>
                                 update(name, (r) => ({
                                     records: [...r.records, ...batch],
@@ -241,8 +257,6 @@ export default function UserDataTool() {
                             onClick={() => {
                                 setTab(t);
                                 setError(null);
-                                if (!LOOKUPS_BY_TAB[t].includes(lookupType))
-                                    setLookupType("email");
                             }}
                             className={`px-4 pb-3 text-base transition-all duration-200 ${
                                 tab === t
@@ -257,12 +271,10 @@ export default function UserDataTool() {
 
                 <AccountFields {...account} />
 
+                {tab === "profile" && (
+                    <>
                 <Label
-                    label={
-                        tab === "events"
-                            ? "Look up by (optional)"
-                            : "Look up by"
-                    }
+                    label="Look up by"
                 >
                     <select
                         className={inputClass}
@@ -272,7 +284,7 @@ export default function UserDataTool() {
                         }
                     >
                         {LOOKUP_TYPES.filter((t) =>
-                            LOOKUPS_BY_TAB[tab].includes(t.value),
+                            PROFILE_LOOKUPS.includes(t.value),
                         ).map((t) => (
                             <option key={t.value} value={t.value}>
                                 {t.label}
@@ -282,7 +294,7 @@ export default function UserDataTool() {
                 </Label>
                 <div className="sm:col-span-2">
                     <Label
-                        label={`${LOOKUP_TYPES.find((t) => t.value === lookupType)!.label}${tab === "events" ? " (optional — leave empty for all users)" : ""}`}
+                        label={LOOKUP_TYPES.find((t) => t.value === lookupType)!.label}
                     >
                         <input
                             className={inputClass}
@@ -299,6 +311,9 @@ export default function UserDataTool() {
                         />
                     </Label>
                 </div>
+
+                    </>
+                )}
 
                 {tab === "events" && (
                     <>
@@ -328,18 +343,37 @@ export default function UserDataTool() {
                                 onChange={(e) => setTo(e.target.value)}
                             />
                         </Label>
+                        <PropertyFilters
+                            filters={filters}
+                            onChange={setFilters}
+                            hint="optional, applied to every selected event"
+                        />
+                        <PropertyFilters
+                            filters={profileFilters}
+                            onChange={setProfileFilters}
+                            title="Profile property filters"
+                            namePlaceholder="Profile field (e.g. Email, Name, Gender)"
+                            hint="optional, e.g. Email, Phone or custom profile properties"
+                        />
+                        <PropertyFilters
+                            filters={techFilters}
+                            onChange={setTechFilters}
+                            title="Technographic filters"
+                            namePlaceholder="Field (e.g. os_version, make, model)"
+                            hint="optional, device/app properties"
+                        />
                         <p className="text-sm text-gray-500 sm:col-span-2">
-                            Enter an email or phone to get one user&apos;s events;
-                            leave it empty to get event data for all users (the
-                            first 20,000 records). With a lookup, we ask
-                            CleverTap to filter the export to that user; if it
-                            can&apos;t, every user&apos;s events for each selected event
-                            are scanned and only this user&apos;s are kept, which can
+                            To get one user&apos;s events, add a profile filter such
+                            as Email equals user@example.com (or Phone equals
+                            +91…, with the country code). With no profile
+                            filters you get event data for all users (the first
+                            20,000 records). We ask CleverTap to apply the
+                            filters to the export; if it can&apos;t, every
+                            user&apos;s events for each selected event are
+                            scanned and only matching ones are kept, which can
                             take a while on busy events (use a short range, and
-                            press Stop any time). For phone, enter the number
-                            with its country code (e.g. +91…) so CleverTap can
-                            filter it. Notification Sent, Bounce and Control
-                            Group events can&apos;t be exported.
+                            press Stop any time). Notification Sent, Bounce and
+                            Control Group events can&apos;t be exported.
                         </p>
                     </>
                 )}

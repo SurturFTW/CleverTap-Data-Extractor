@@ -1,13 +1,11 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Download, Hash, Loader2, Plus, Trash2, X } from "lucide-react";
+import { Download, Hash, Loader2, X } from "lucide-react";
 import { fetchCount } from "@/lib/clevertap/fetch-count";
 import type {
   CountKind,
   Credentials,
-  FilterOperator,
-  PropertyFilter,
 } from "@/lib/clevertap/types";
 import { daysAgo, isoToInt } from "@/lib/utils/dates";
 import { fmtNumber } from "@/lib/utils/format";
@@ -16,6 +14,10 @@ import AccountFields, {
   useSelectedAccount,
 } from "@/components/shared/AccountFields";
 import EventPicker from "@/components/shared/EventPicker";
+import PropertyFilters, {
+  buildFilters,
+  type FilterRow,
+} from "@/components/shared/PropertyFilters";
 import {
   CopyTsvButton,
   ErrorBanner,
@@ -30,27 +32,6 @@ import {
 } from "@/components/shared/ui";
 
 const CONCURRENCY = 3;
-
-const OPERATORS: { value: FilterOperator; label: string; needsValue: boolean }[] = [
-  { value: "equals", label: "equals", needsValue: true },
-  { value: "contains", label: "contains", needsValue: true },
-  { value: "not_contains", label: "does not contain", needsValue: true },
-  { value: "gt", label: "greater than", needsValue: true },
-  { value: "gte", label: "greater than or equal", needsValue: true },
-  { value: "lt", label: "less than", needsValue: true },
-  { value: "lte", label: "less than or equal", needsValue: true },
-  { value: "exists", label: "exists", needsValue: false },
-  { value: "not_exists", label: "does not exist", needsValue: false },
-];
-const NUMERIC: FilterOperator[] = ["gt", "gte", "lt", "lte"];
-
-type FilterRow = { id: string; name: string; operator: FilterOperator; value: string };
-const newFilter = (): FilterRow => ({
-  id: Math.random().toString(36).slice(2),
-  name: "",
-  operator: "equals",
-  value: "",
-});
 
 const cellKey = (event: string, kind: CountKind) => `${event}:${kind}`;
 
@@ -70,9 +51,6 @@ export default function CountsTool() {
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const patchFilter = (id: string, p: Partial<FilterRow>) =>
-    setFilters((prev) => prev.map((f) => (f.id === id ? { ...f, ...p } : f)));
-
   async function run() {
     setError(null);
     const fromInt = isoToInt(from);
@@ -89,22 +67,8 @@ export default function CountsTool() {
     if (!fromInt || !toInt) return setError("Pick a valid date range.");
     if (fromInt > toInt) return setError("From date must be on or before To date.");
 
-    const eventProperties: PropertyFilter[] = [];
-    for (const f of filters) {
-      const op = OPERATORS.find((o) => o.value === f.operator)!;
-      if (!f.name.trim()) return setError("Each property filter needs a property name.");
-      if (op.needsValue && !f.value.trim())
-        return setError(`Enter a value for the “${f.name}” filter.`);
-      if (NUMERIC.includes(f.operator) && !Number.isFinite(Number(f.value)))
-        return setError(`“${f.name}” ${op.label} needs a number.`);
-      eventProperties.push({
-        name: f.name.trim(),
-        operator: f.operator,
-        ...(op.needsValue && {
-          value: NUMERIC.includes(f.operator) ? Number(f.value) : f.value.trim(),
-        }),
-      });
-    }
+    const eventProperties = buildFilters(filters);
+    if (typeof eventProperties === "string") return setError(eventProperties);
 
     const creds: Credentials = {
       accountId: current.accountId.trim(),
@@ -219,49 +183,11 @@ export default function CountsTool() {
           <input className={inputClass} type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </Label>
 
-        <div className="flex flex-col gap-3 sm:col-span-2">
-          <p className="text-sm font-medium text-gray-700">
-            Event property filters <span className="font-normal text-gray-500">(optional, applied to every event)</span>
-          </p>
-          {filters.map((f) => {
-            const needsValue = OPERATORS.find((o) => o.value === f.operator)!.needsValue;
-            return (
-              <div key={f.id} className="grid items-center gap-2 sm:grid-cols-[1fr_12rem_1fr_auto]">
-                <input
-                  className={inputClass}
-                  placeholder="Property name"
-                  value={f.name}
-                  onChange={(e) => patchFilter(f.id, { name: e.target.value })}
-                />
-                <select
-                  className={inputClass}
-                  value={f.operator}
-                  onChange={(e) => patchFilter(f.id, { operator: e.target.value as FilterOperator })}
-                >
-                  {OPERATORS.map((o) => (
-                    <option key={o.value} value={o.value}>{o.label}</option>
-                  ))}
-                </select>
-                <input
-                  className={inputClass}
-                  placeholder={needsValue ? "Value" : "—"}
-                  disabled={!needsValue}
-                  value={needsValue ? f.value : ""}
-                  onChange={(e) => patchFilter(f.id, { value: e.target.value })}
-                />
-                <SecondaryButton onClick={() => setFilters((prev) => prev.filter((x) => x.id !== f.id))}>
-                  <Trash2 size={18} />
-                </SecondaryButton>
-              </div>
-            );
-          })}
-          <div>
-            <SecondaryButton onClick={() => setFilters((prev) => [...prev, newFilter()])}>
-              <Plus size={18} />
-              Add filter
-            </SecondaryButton>
-          </div>
-        </div>
+        <PropertyFilters
+          filters={filters}
+          onChange={setFilters}
+          hint="optional, applied to every event"
+        />
 
         <div className="flex items-center gap-3 pt-2 sm:col-span-2">
           <PrimaryButton type="submit" disabled={running}>

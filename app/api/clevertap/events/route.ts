@@ -2,6 +2,7 @@ import { fetchEventBatch, startEventExport } from "@/lib/server/clevertap-users"
 import {
   badRequest,
   parseCreds,
+  parseFilters,
   parseLookup,
   parseRange,
 } from "@/lib/server/request";
@@ -20,12 +21,15 @@ export async function POST(request: Request) {
   const creds = parseCreds(body.credentials);
   if (typeof creds === "string") return badRequest(creds);
 
+  const filters = parseFilters(body.filters);
+  if (typeof filters === "string") return badRequest(filters);
+
   try {
     if (typeof body.cursor === "string" && body.cursor) {
       // No lookup -> all users' records
       const lookup = body.lookup?.value?.trim() ? parseLookup(body.lookup) : undefined;
       if (typeof lookup === "string") return badRequest(lookup);
-      return Response.json(await fetchEventBatch(creds, body.cursor, lookup));
+      return Response.json(await fetchEventBatch(creds, body.cursor, lookup, filters));
     }
 
     // Optional here: it only enables CleverTap-side filtering of the export.
@@ -35,7 +39,7 @@ export async function POST(request: Request) {
     if (!eventName) return badRequest("Event name is required");
     const range = parseRange(body.range);
     if (typeof range === "string") return badRequest(range);
-    return Response.json(await startEventExport(creds, eventName, range, lookup, body.useFilter !== false));
+    return Response.json(await startEventExport(creds, eventName, range, lookup, filters, body.useFilter !== false));
   } catch (e) {
     return Response.json(
       { status: "fail", error: e instanceof Error ? e.message : "Upstream error" },
