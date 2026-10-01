@@ -8,6 +8,7 @@ It replaces the old Apps Script reports (`IdentityErrors.gs`, `PushImpressions.g
 | `/identity-errors` | Identity Set (new / merged / appended) and Identity Error counts, split by SDK vs API |
 | `/push-impressions` | Notification Sent vs Push Impressions per account, for total / Android / iOS |
 | `/user-data` | A user's profile, or their events (by email or phone; leave empty for all users) |
+| `/tam` | Per-TAM quarterly tracker: identity errors, push impressions and audit status, saved per quarter in the browser |
 
 ## Running it
 

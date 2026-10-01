@@ -6,6 +6,8 @@ import { usePersistentState } from "./use-persistent-state";
 export type Account = {
   id: string;
   name: string;
+  /** Technical Account Manager who owns this account (used by the TAM tracker) */
+  tam?: string;
   accountId: string;
   passcode: string;
   region: Region;

@@ -1,4 +1,4 @@
-import { BellRing, Hash, Upload, UserCheck, UserSearch } from "lucide-react";
+import { BellRing, Hash, Upload, UserCheck, UserSearch, Users } from "lucide-react";
 
 export const TOOLS = [
     {
@@ -30,5 +30,12 @@ export const TOOLS = [
         label: "Upload",
         description: "Upload user profiles and events in bulk",
         icon: Upload,
+    },
+    {
+        href: "/tam",
+        label: "TAM Tracker",
+        description:
+            "Quarterly identity errors, push impressions and audit status per TAM account",
+        icon: Users,
     },
 ];
