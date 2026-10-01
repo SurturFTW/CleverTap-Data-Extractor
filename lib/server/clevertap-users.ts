@@ -67,29 +67,48 @@ function ctqlProfileFilter(lookup: UserLookup) {
   return null;
 }
 
-async function postExport(
-  creds: Credentials,
-  body: Record<string, unknown>,
-): Promise<{ data: Record<string, unknown>; res: Response }> {
-  // HTTP 202 means CleverTap is still preparing the export; retry briefly.
-  for (let attempt = 0; ; attempt++) {
-    const res = await fetch(`${base(creds.region)}/events.json?batch_size=5000`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders(creds) },
-      body: JSON.stringify(body),
+/**
+ * CleverTap stores phones as "+<country code><number>" and matches them
+ * exactly, so tidy what the user typed ("+99 1919-291931" -> "+991919291931").
+ */
+function normaliseProfileFilter(f: PropertyFilter): PropertyFilter {
+  if (f.name.trim().toLowerCase() !== "phone" || typeof f.value !== "string") return f;
+  const v = f.value.trim();
+  return { ...f, value: v.startsWith("+") ? `+${v.replace(/\D/g, "")}` : v.replace(/[\s()-]/g, "") };
+}
+
+/**
+ * Each of our requests makes ONE short call to CleverTap. Hosts kill slow
+ * functions (a 504 with a non-JSON body), so anything slower than this is
+ * reported as "pending" and the browser asks again.
+ */
+const UPSTREAM_TIMEOUT_MS = 20_000;
+
+type Upstream = { data: Record<string, unknown>; res: Response } | "timeout";
+
+async function upstream(url: string, init: RequestInit): Promise<Upstream> {
+  try {
+    const res = await fetch(url, {
+      ...init,
       cache: "no-store",
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
-    if (res.status !== 202 || attempt >= 4) return { data: await readJson(res), res };
-    await new Promise((r) => setTimeout(r, 2000));
+    return { data: await readJson(res), res };
+  } catch (e) {
+    if (e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")) {
+      return "timeout";
+    }
+    throw e;
   }
 }
 
 /**
  * Step 1 of the Get Events API: ask for a cursor over events in the range.
- * The docs list only event_name/from/to, but the query-language docs show an
- * Email/Phone profile filter, so we try it first (it can shrink the export to
- * a handful of records) and fall back to the plain export if it's rejected.
- * Records are re-checked against the lookup in fetchEventBatch either way.
+ * With filters, one attempt is made with them attached (CleverTap can then
+ * return only the matching users). If CleverTap rejects that, the reply says
+ * `filterRejected` and the browser asks again with useFilter=false (a plain
+ * export, re-filtered record by record in fetchEventBatch). HTTP 202 / slow
+ * replies come back as "pending".
  */
 export async function startEventExport(
   creds: Credentials,
@@ -108,24 +127,31 @@ export async function startEventExport(
     ...(filters.eventProperties.length ? { event_properties: filters.eventProperties } : {}),
   };
   const lookupFilter = lookup && useFilter ? ctqlProfileFilter(lookup) : null;
-  const profileFields = [...(lookupFilter ? [lookupFilter] : []), ...filters.profile];
+  const profileFields = [
+    ...(lookupFilter ? [lookupFilter] : []),
+    ...filters.profile.map(normaliseProfileFilter),
+  ];
   const common = {
     ...(profileFields.length ? { profile_fields: profileFields } : {}),
     ...(filters.technographics.length ? { technographics: filters.technographics } : {}),
   };
+  const filtered = useFilter && Object.keys(common).length > 0;
 
-  if (Object.keys(common).length) {
-    const { data } = await postExport(creds, { ...plain, common_profile_properties: common });
-    if (data.status === "success" && typeof data.cursor === "string") {
-      return { status: "success", cursor: data.cursor, filtered: true };
-    }
-  }
+  const r = await upstream(`${base(creds.region)}/events.json?batch_size=5000`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(creds) },
+    body: JSON.stringify(filtered ? { ...plain, common_profile_properties: common } : plain),
+  });
 
-  const { data, res } = await postExport(creds, plain);
-  if (data.status === "success" && typeof data.cursor === "string") {
-    return { status: "success", cursor: data.cursor, filtered: false };
+  if (r === "timeout" || r.res.status === 202) return { status: "pending" };
+  if (r.data.status === "success" && typeof r.data.cursor === "string") {
+    return { status: "success", cursor: r.data.cursor, filtered };
   }
-  return { status: "fail", error: errorOf(data, res, "Start export") };
+  return {
+    status: "fail",
+    error: errorOf(r.data, r.res, "Start export"),
+    filterRejected: filtered,
+  };
 }
 
 const normId = (v: unknown) => String(v ?? "").replace(/^-/, "").toLowerCase();
@@ -178,19 +204,34 @@ function profileProps(rec: EventRecord): Record<string, unknown> {
 function matchesProperty(
   source: Record<string, unknown> | undefined,
   f: PropertyFilter,
+  /**
+   * CleverTap already applied this filter to the export. The exported record
+   * may simply not include the property, so only drop a record when it has the
+   * property and it positively fails; never because the property is absent.
+   */
+  lenient = false,
 ): boolean {
   const props = source ?? {};
   const key = Object.keys(props).find((k) => k.toLowerCase() === f.name.toLowerCase());
   const actual = key === undefined ? undefined : props[key];
-  if (f.operator === "exists") return actual !== undefined && actual !== null;
-  if (f.operator === "not_exists") return actual === undefined || actual === null;
-  if (actual === undefined || actual === null) return f.operator === "not_contains";
+  if (actual === undefined || actual === null) {
+    if (lenient) return true;
+    if (f.operator === "exists") return false;
+    if (f.operator === "not_exists") return true;
+    return f.operator === "not_contains";
+  }
+  if (f.operator === "exists") return true;
+  if (f.operator === "not_exists") return false;
 
   const a = String(actual).toLowerCase();
   const want = Array.isArray(f.value) ? f.value : [f.value];
   const w = want.map((x) => String(x ?? "").toLowerCase());
   switch (f.operator) {
     case "equals":
+      // Phones compare on digits so "+99 1919 291931" equals "+991919291931"
+      if (f.name.trim().toLowerCase() === "phone") {
+        return want.some((x) => samePhone(digits(actual), digits(x)));
+      }
       return w.includes(a);
     case "contains":
       return w.some((x) => a.includes(x));
@@ -226,18 +267,17 @@ export async function fetchEventBatch(
   cursor: string,
   lookup?: UserLookup,
   filters: EventFilters = NO_FILTERS,
+  /** true when CleverTap accepted the filters on the export request */
+  serverFiltered = false,
 ): Promise<EventBatchResponse> {
   // Batches are fetched with POST + ?cursor= (as in the working reference
   // implementation), not the GET shown in the docs.
-  const res = await fetch(
-    `${base(creds.region)}/events.json?cursor=${rawCursor(cursor)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders(creds) },
-      cache: "no-store",
-    },
-  );
-  const data = await readJson(res);
+  const r = await upstream(`${base(creds.region)}/events.json?cursor=${rawCursor(cursor)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(creds) },
+  });
+  if (r === "timeout") return { status: "pending" };
+  const { data, res } = r;
 
   // Still being prepared on CleverTap's side: HTTP 202, or {"status":"fail","code":2}
   if (res.status === 202 || (data.status === "fail" && data.code === 2)) {
@@ -251,8 +291,12 @@ export async function fetchEventBatch(
       records: all.filter(
         (r) =>
           (!lookup || matches(r, lookup)) &&
-          filters.eventProperties.every((f) => matchesProperty(r.event_props, f)) &&
-          filters.profile.every((f) => matchesProperty(profileProps(r), f)),
+          filters.eventProperties.every((f) =>
+            matchesProperty(r.event_props, f, serverFiltered),
+          ) &&
+          filters.profile.every((f) =>
+            matchesProperty(profileProps(r), f, serverFiltered),
+          ),
       ),
       nextCursor: typeof data.next_cursor === "string" ? data.next_cursor : null,
       scanned: all.length,

@@ -104,7 +104,14 @@ export type ExportStartResponse =
       /** true if CleverTap accepted the Email/Phone filter on the export request */
       filtered: boolean;
     }
-  | { status: "fail"; error: string };
+  /** CleverTap is still preparing the export (or was slow); ask again */
+  | { status: "pending" }
+  | {
+      status: "fail";
+      error: string;
+      /** The export was rejected while filters were attached; retry without them */
+      filterRejected?: boolean;
+    };
 
 export type EventBatchResponse =
   | {
