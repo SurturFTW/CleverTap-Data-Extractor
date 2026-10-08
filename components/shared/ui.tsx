@@ -50,6 +50,7 @@ export function RegionSelect({
   );
 }
 
+/** Buttons are 46px tall (2px border + py-[9px]) to match the 46px inputs next to them. */
 export function PrimaryButton(
   props: React.ButtonHTMLAttributes<HTMLButtonElement>,
 ) {
@@ -57,7 +58,7 @@ export function PrimaryButton(
     <button
       type="button"
       {...props}
-      className="flex items-center justify-center gap-2 rounded-xl bg-black px-5 py-2.5 text-base font-medium text-white shadow-sm transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:bg-gray-400"
+      className="flex min-h-[46px] items-center justify-center gap-2 rounded-xl border-2 border-black bg-black px-5 py-[9px] text-base font-medium text-white shadow-sm transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:border-gray-400 disabled:bg-gray-400"
     />
   );
 }
@@ -69,7 +70,7 @@ export function SecondaryButton(
     <button
       type="button"
       {...props}
-      className="flex items-center justify-center gap-2 rounded-xl border-2 border-black px-5 py-2.5 text-base font-medium text-black transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+      className="flex min-h-[46px] items-center justify-center gap-2 rounded-xl border-2 border-black px-5 py-[9px] text-base font-medium text-black transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
     />
   );
 }

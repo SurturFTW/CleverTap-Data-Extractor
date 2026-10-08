@@ -4,8 +4,10 @@ import { Download, Loader2, UserCheck, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { fetchCount } from "@/lib/clevertap/fetch-count";
 import { IDENTITY_ROWS, identityQueries } from "@/lib/clevertap/identity-queries";
-import type { Credentials, Region } from "@/lib/clevertap/types";
-import { useSavedAccounts } from "@/lib/utils/use-saved-accounts";
+import type { Credentials } from "@/lib/clevertap/types";
+import AccountFields, {
+    useSelectedAccount,
+} from "@/components/shared/AccountFields";
 import { daysAgo, isoToInt } from "@/lib/utils/dates";
 import { fmtPercent, ratio } from "@/lib/utils/format";
 import { runPool } from "@/lib/utils/pool";
@@ -15,7 +17,6 @@ import {
     Label,
     NumCell,
     PrimaryButton,
-    RegionSelect,
     SecondaryButton,
     inputClass,
     td,
@@ -26,21 +27,15 @@ import {
 const CONCURRENCY = 3;
 
 export default function IdentityErrorsTool() {
-    const [accounts, setAccounts] = useSavedAccounts();
-    const [selectedId, setSelectedId] = useState("");
-    const current = accounts.find((a) => a.id === selectedId) ?? accounts[0];
+    const account = useSelectedAccount();
+    const { current } = account;
     const { accountId, passcode, region } = current;
-    const patch = (p: Partial<typeof current>) =>
-        setAccounts((prev) =>
-            prev.map((a) => (a.id === current.id ? { ...a, ...p } : a)),
-        );
-    const setAccountId = (accountId: string) => patch({ accountId });
-    const setPasscode = (passcode: string) => patch({ passcode });
-    const setRegion = (region: Region) => patch({ region });
     const [from, setFrom] = useState(daysAgo(7));
     const [to, setTo] = useState(daysAgo(1));
 
     const [cells, setCells] = useState<Record<string, Cell>>({});
+    // Which account the table below was fetched for (the form can change after)
+    const [ranFor, setRanFor] = useState("");
     const [running, setRunning] = useState(false);
     const [formError, setFormError] = useState<string | null>(null);
     const abortRef = useRef<AbortController | null>(null);
@@ -64,6 +59,9 @@ export default function IdentityErrorsTool() {
         const controller = new AbortController();
         abortRef.current = controller;
 
+        setRanFor(
+            `${current.name.trim() || accountId.trim()} · ${region} · ${from} to ${to}`,
+        );
         setRunning(true);
         setCells(
             Object.fromEntries(
@@ -164,43 +162,7 @@ export default function IdentityErrorsTool() {
                     <UserCheck size={24} />
                     CleverTap Account
                 </h2>
-                {accounts.length > 1 && (
-                    <div className="sm:col-span-2">
-                        <Label label="Saved account">
-                            <select
-                                className={inputClass}
-                                value={current.id}
-                                onChange={(e) => setSelectedId(e.target.value)}
-                            >
-                                {accounts.map((a, i) => (
-                                    <option key={a.id} value={a.id}>
-                                        {a.name || a.accountId || `Account ${i + 1}`}
-                                    </option>
-                                ))}
-                            </select>
-                        </Label>
-                    </div>
-                )}
-                <Label label="Account ID">
-                    <input
-                        className={inputClass}
-                        value={accountId}
-                        onChange={(e) => setAccountId(e.target.value)}
-                        autoComplete="off"
-                    />
-                </Label>
-                <Label label="Passcode">
-                    <input
-                        className={inputClass}
-                        type="password"
-                        value={passcode}
-                        onChange={(e) => setPasscode(e.target.value)}
-                        autoComplete="off"
-                    />
-                </Label>
-                <Label label="Region">
-                    <RegionSelect value={region} onChange={setRegion} />
-                </Label>
+                <AccountFields {...account} />
                 <Label label="From">
                     <input
                         className={inputClass}
@@ -240,6 +202,12 @@ export default function IdentityErrorsTool() {
 
             {formError && <ErrorBanner>{formError}</ErrorBanner>}
 
+            {hasResults && ranFor && (
+                <p className="-mb-2 text-sm text-gray-600">
+                    Results for{" "}
+                    <span className="font-medium text-black">{ranFor}</span>
+                </p>
+            )}
             {hasResults && (
                 <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-md">
                     <table className="w-full">

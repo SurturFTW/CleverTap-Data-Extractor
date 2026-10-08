@@ -22,9 +22,25 @@ import {
 } from "@/lib/clevertap/upload";
 import { fmtNumber } from "@/lib/utils/format";
 import { postJson } from "@/lib/utils/http";
+import ConfirmUploadDialog, { type UploadTarget } from "./ConfirmUploadDialog";
 import RecordEditor from "./RecordEditor";
 
-type Outcome = { kind: UploadKind; dryRun: boolean; sent: number; res: UploadResponse };
+type Outcome = {
+  kind: UploadKind;
+  dryRun: boolean;
+  sent: number;
+  /** The account the request went to, e.g. "Acme (12345) · in1" */
+  account: string;
+  res: UploadResponse;
+};
+
+/** Everything needed to send, frozen when the user clicks (so a confirmed upload is exactly what was shown) */
+type Snapshot = {
+  kind: UploadKind;
+  creds: { accountId: string; passcode: string; region: string };
+  records: Record<string, unknown>[];
+  target: UploadTarget;
+};
 
 const LABEL: Record<UploadKind, { tab: string; noun: string }> = {
   profile: { tab: "User profiles", noun: "profile" },
@@ -44,6 +60,7 @@ export default function UploadTool() {
   const [busy, setBusy] = useState<"dry" | "live" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const [pending, setPending] = useState<Snapshot | null>(null);
 
   const list = drafts[kind];
   const setList = (next: RecordDraft[]) => setDrafts((d) => ({ ...d, [kind]: next }));
@@ -55,44 +72,75 @@ export default function UploadTool() {
     [batch],
   );
 
-  async function send(dryRun: boolean) {
+  const accountLabel = (t: { name: string; accountId: string; region: string }) =>
+    `${t.name.trim() ? `${t.name.trim()} (${t.accountId})` : t.accountId} · ${t.region}`;
+
+  /** Validates the form and freezes what would be sent, or reports why not. */
+  function snapshot(): Snapshot | null {
     setError(null);
     setOutcome(null);
-    if (!current.accountId.trim() || !current.passcode.trim())
-      return setError("Enter the Account ID and Passcode.");
-    if (!batch.ok) return setError(batch.error);
-
-    if (!dryRun) {
-      const n = batch.value.length;
-      const ok = window.confirm(
-        `Upload ${n} ${LABEL[kind].noun}${n === 1 ? "" : "s"} to account ${current.accountId.trim()} (${current.region})?\n\n` +
-          "This writes to CleverTap and can't be undone from here.",
-      );
-      if (!ok) return;
+    if (!current.accountId.trim() || !current.passcode.trim()) {
+      setError("Enter the Account ID and Passcode.");
+      return null;
     }
+    if (!batch.ok) {
+      setError(batch.error);
+      return null;
+    }
+    const events = Array.from(
+      new Set(
+        batch.value.map((r) => (typeof r.evtName === "string" ? r.evtName : "")).filter(Boolean),
+      ),
+    );
+    return {
+      kind,
+      creds: {
+        accountId: current.accountId.trim(),
+        passcode: current.passcode.trim(),
+        region: current.region,
+      },
+      records: batch.value,
+      target: {
+        name: current.name,
+        accountId: current.accountId.trim(),
+        region: current.region,
+        count: batch.value.length,
+        noun: LABEL[kind].noun,
+        detail: kind === "event" && events.length ? events.join(", ") : undefined,
+      },
+    };
+  }
 
+  async function transmit(snap: Snapshot, dryRun: boolean) {
     setBusy(dryRun ? "dry" : "live");
     try {
       const data = await postJson<UploadResponse>(
-                "/api/clevertap/upload",
-                {
-          credentials: {
-            accountId: current.accountId.trim(),
-            passcode: current.passcode.trim(),
-            region: current.region,
-          },
-          records: batch.value,
-          dryRun,
-        },
-                // Writes are never retried automatically
-                { step: "Upload", retries: 0 },
-            );
-      setOutcome({ kind, dryRun, sent: batch.value.length, res: data });
+        "/api/clevertap/upload",
+        { credentials: snap.creds, records: snap.records, dryRun },
+        // Writes are never retried automatically
+        { step: "Upload", retries: 0 },
+      );
+      setOutcome({
+        kind: snap.kind,
+        dryRun,
+        sent: snap.records.length,
+        account: accountLabel(snap.target),
+        res: data,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
     } finally {
       setBusy(null);
+      setPending(null);
     }
+  }
+
+  /** Dry runs go straight out; a real upload first opens the confirmation. */
+  function send(dryRun: boolean) {
+    const snap = snapshot();
+    if (!snap) return;
+    if (dryRun) void transmit(snap, true);
+    else setPending(snap);
   }
 
   return (
@@ -164,6 +212,18 @@ export default function UploadTool() {
           </div>
         </details>
 
+        <div className="rounded-xl border-2 border-black bg-gray-50 px-4 py-3 text-sm">
+          <span className="text-gray-500">Uploads will go to </span>
+          {current.accountId.trim() ? (
+            <span className="font-semibold text-black">
+              {current.name.trim() ? `${current.name.trim()} · ` : ""}
+              <span className="font-mono">{current.accountId.trim()}</span> · {current.region}
+            </span>
+          ) : (
+            <span className="font-semibold text-red-700">no account selected</span>
+          )}
+        </div>
+
         <div className="flex flex-wrap items-center gap-3 pt-2">
           <SecondaryButton onClick={() => send(true)} disabled={busy !== null}>
             {busy === "dry" ? <Loader2 size={18} className="animate-spin" /> : <ShieldCheck size={18} />}
@@ -177,18 +237,28 @@ export default function UploadTool() {
         </div>
         <p className="text-sm text-gray-500">
           A dry run asks CleverTap to validate the records without saving anything. Uploading
-          writes to the account above and asks you to confirm first.
+          writes to the account shown above, and asks you to type its Account ID to confirm
+          first.
         </p>
       </div>
 
       {error && <ErrorBanner>{error}</ErrorBanner>}
       {outcome && <Result outcome={outcome} />}
+
+      {pending && (
+        <ConfirmUploadDialog
+          target={pending.target}
+          busy={busy === "live"}
+          onCancel={() => setPending(null)}
+          onConfirm={() => void transmit(pending, false)}
+        />
+      )}
     </div>
   );
 }
 
 function Result({ outcome }: { outcome: Outcome }) {
-  const { res, dryRun, sent } = outcome;
+  const { res, dryRun, sent, account } = outcome;
   const failed = res.unprocessed.length;
   const good = res.status === "success" && !res.error;
 
@@ -205,6 +275,7 @@ function Result({ outcome }: { outcome: Outcome }) {
             {dryRun ? "Dry run" : "Upload"}{" "}
             {good ? "succeeded" : res.status === "partial" ? "partly succeeded" : "failed"}
           </h3>
+          <p className="text-xs text-gray-500">Account: {account}</p>
           <p className="text-sm text-gray-600">
             {fmtNumber(res.processed)} of {fmtNumber(sent)} record{sent === 1 ? "" : "s"}{" "}
             {dryRun ? "valid" : "processed"}

@@ -1,16 +1,15 @@
 import PushImpressionsTool from "@/components/push/PushImpressionsTool";
-import PageTitle from "@/components/shared/PageTitle";
+import ToolPage from "@/components/shared/ToolPage";
 
 export const metadata = { title: "Push Impressions · CleverPort" };
 
 export default function Page() {
-    return (
-        <div className="mx-auto w-full max-w-6xl">
-            <PageTitle
-                title="Push Impressions"
-                subtitle="Notifications sent vs. push impressions, by platform"
-            />
-            <PushImpressionsTool />
-        </div>
-    );
+  return (
+    <ToolPage
+      title="Push Impressions"
+      subtitle="Notifications sent vs. push impressions, by platform"
+    >
+      <PushImpressionsTool />
+    </ToolPage>
+  );
 }

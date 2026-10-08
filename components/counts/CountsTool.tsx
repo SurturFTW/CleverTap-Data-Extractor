@@ -45,6 +45,8 @@ export default function CountsTool() {
   const [to, setTo] = useState(daysAgo(1));
   const [filters, setFilters] = useState<FilterRow[]>([]);
 
+  // Which account the table below was fetched for (the form can change after)
+  const [ranFor, setRanFor] = useState("");
   const [cells, setCells] = useState<Record<string, Cell>>({});
   const [shown, setShown] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
@@ -78,6 +80,7 @@ export default function CountsTool() {
     const controller = new AbortController();
     abortRef.current = controller;
 
+    setRanFor(`${current.name.trim() || current.accountId.trim()} · ${current.region} · ${from} to ${to}`);
     setEventNames(names);
     setEventInput("");
     setShown(names);
@@ -205,6 +208,12 @@ export default function CountsTool() {
       </form>
 
       {error && <ErrorBanner>{error}</ErrorBanner>}
+
+      {shown.length > 0 && ranFor && (
+        <p className="-mb-2 text-sm text-gray-600">
+          Results for <span className="font-medium text-black">{ranFor}</span>
+        </p>
+      )}
 
       {shown.length > 0 && (
         <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-md">
